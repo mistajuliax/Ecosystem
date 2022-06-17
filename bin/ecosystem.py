@@ -36,7 +36,7 @@
 
 import os, glob, re, copy, getopt, sys, string, subprocess, platform
 
-def  determineNumberOfCPUs():
+def determineNumberOfCPUs():
     """ Number of virtual or physical CPUs on this system, i.e.
     user/real as output by time(1) when called with an optimally scaling
     userspace-only program"""
@@ -102,11 +102,7 @@ def  determineNumberOfCPUs():
         pseudoDevices = os.listdir('/devices/pseudo/')
         expr = re.compile('^cpuid@[0-9]+$')
 
-        res = 0
-        for pd in pseudoDevices:
-            if expr.match(pd) != None:
-                res += 1
-
+        res = sum(expr.match(pd) != None for pd in pseudoDevices)
         if res > 0:
             return res
     except OSError:
@@ -161,13 +157,13 @@ class Variable:
         if (type(value) == dict):
             if ('common' in value):
                 platform_value = value['common']
-                
+
             if (platform.system().lower() in value):
                 platform_value = value[platform.system().lower()]
-            
+
         else:
             platform_value = value
-            
+
         if(type(value) == dict):
             if ('strict' in value):
                 self.strict = value['strict']
@@ -177,37 +173,30 @@ class Variable:
                         self.absolute = True
                 else:
                     self.absolute = value['abs']
-            
-        if (platform_value):
-            if platform_value not in self.values:
-                self.values.append(platform_value)
-                var_dependencies = self.checkForDependencies(platform_value)
-                if (var_dependencies):
-                    for var_dependency in var_dependencies:
-                        if var_dependency not in self.dependencies:
-                            self.dependencies.append(var_dependency)
+
+        if platform_value and platform_value not in self.values:
+            self.values.append(platform_value)
+            if var_dependencies := self.checkForDependencies(platform_value):
+                for var_dependency in var_dependencies:
+                    if var_dependency not in self.dependencies:
+                        self.dependencies.append(var_dependency)
             
     """Checks the value to see if it has any dependency on other Variables, returning them in a list"""
     def checkForDependencies(self, value):
         if not self.dependency_re:
             self.dependency_re = re.compile(r"\${\w*}")
-            
-        matched = self.dependency_re.findall(value)
-        if matched:
-            dependencies = []
-            for match in matched:
-                dependency = match[2:-1]
-                if (dependency != self.name):
-                    if dependency not in dependencies:
-                        dependencies.append(dependency)
-            return dependencies
-        else:
+
+        if not (matched := self.dependency_re.findall(value)):
             return None
+        dependencies = []
+        for match in matched:
+            dependency = match[2:-1]
+            if (dependency != self.name) and dependency not in dependencies:
+                dependencies.append(dependency)
+        return dependencies
             
     def hasValue(self):
-        if ( len(self.values) > 0 ):
-            return True
-        return False
+        return len(self.values) > 0
         
     def getEnv(self):
         value = ''
@@ -225,13 +214,10 @@ class Tool:
     """Defines a tool - more specifically, a version of a tool"""
     def __init__(self, filename):
         self.filename = filename
-        
-        f = open(filename, 'r')
-        
-        self.in_dictionary = eval(f.read())
-        
-        f.close()
-        
+
+        with open(filename, 'r') as f:
+            self.in_dictionary = eval(f.read())
+
         if (self.in_dictionary):
             self.tool = self.in_dictionary['tool']
             self.version = self.in_dictionary['version']
@@ -255,16 +241,11 @@ class Tool:
                 
     """Check to see if the tool is supported on the current platform"""
     def plaformSupported(self):
-        if (self.platforms):
-            if (platform.system().lower() in self.platforms):
-                return True
-        return False
+        return bool(self.platforms and (platform.system().lower() in self.platforms))
     
     """Checks to see if this tool defines the given variables"""
     def definesVariable(self, var):
-        if var in self.variables:
-            return True
-        return False
+        return var in self.variables
 
 class Environment:
     """Once initialized this will represent the environment defined by the wanted tools"""
@@ -378,24 +359,25 @@ class Environment:
         
     def getEnv(self, SetEnvironment = False ):
         #Combine all of the variable in all the tools based on a dependency list
-        if self.success:
-            self.defined_variables = []
-            self.value = '#Environment created via Ecosystem\n'
-            
-            for var_name, variable in self.variables.iteritems():
-                if self.variables[var_name].hasValue():
-                    if not SetEnvironment:
-                        self.getVar(variable)
-                    else:
-                        self.getVarEnv(variable)
-                    
-            if not SetEnvironment:
-                return self.value
-                
-            for env_name, env_value in os.environ.iteritems():
-                os.environ[env_name] = os.path.expandvars(env_value)
-            for env_name, env_value in os.environ.iteritems():
-                os.environ[env_name] = os.path.expandvars(env_value)
+        if not self.success:
+            return
+        self.defined_variables = []
+        self.value = '#Environment created via Ecosystem\n'
+
+        for var_name, variable in self.variables.iteritems():
+            if self.variables[var_name].hasValue():
+                if not SetEnvironment:
+                    self.getVar(variable)
+                else:
+                    self.getVarEnv(variable)
+
+        if not SetEnvironment:
+            return self.value
+
+        for env_name, env_value in os.environ.iteritems():
+            os.environ[env_name] = os.path.expandvars(env_value)
+        for env_name, env_value in os.environ.iteritems():
+            os.environ[env_name] = os.path.expandvars(env_value)
 
                 
 def listAvailableTools():
